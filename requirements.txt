@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+tensorflow==2.19.0
+joblib
+pandas
+numpy
+scikit-learn
+pydantic
+ta
+websockets
