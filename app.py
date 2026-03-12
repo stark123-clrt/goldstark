@@ -172,7 +172,8 @@ async def fetch_candles(ws, tf_name: str, include_current: bool = False) -> List
     start_epoch = now_epoch - (HISTORY_DAYS[tf_name] * 86400)
 
     req = {
-        "ticks_history": "frxXAUUSD",
+        # "ticks_history": "cryBTCUSD",
+        "ticks_history": "cryBTCUSD",
         "adjust_start_time": 1,
         "start": start_epoch,
         "end": "latest",
