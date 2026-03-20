@@ -352,9 +352,9 @@
   ],
   "n_features": 346,
   "best_epoch": 15,
-  "val_auc": 0.78462815284729,
-  "test_auc": 0.7483867502764403,
-  "test_accuracy": 0.6679333333333334,
+  "val_auc": 0.7858676910400391,
+  "test_auc": 0.7474537243415864,
+  "test_accuracy": 0.6793333333333333,
   "timeframes": [
     "M15",
     "M30",
@@ -365,5 +365,5 @@
   "train_size": 70180,
   "val_size": 14999,
   "test_size": 15000,
-  "date_trained": "2026-02-24"
+  "date_trained": "2026-02-22"
 }
