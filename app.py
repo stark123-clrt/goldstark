@@ -40,7 +40,7 @@ app = FastAPI(title="GoldSniper XAUUSD API", version="4.0")
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
-DERIV_API_KEY = os.environ.get("DERIV_API_KEY", "rjs4NEQHKlcWSAf")
+DERIV_API_KEY = os.environ.get("DERIV_API_KEY", "pat_0318d03baac60afe24a285c0acfc08c518073e72d226d97b0d7b34cbb1f518c2")
 DERIV_WS_URL  = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
 
 M15_SECONDS        = 900
