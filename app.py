@@ -7,7 +7,7 @@ GoldSniper XAUUSD API v4.0
 
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Dict
 import numpy as np
 import pandas as pd
 import joblib
@@ -40,11 +40,14 @@ app = FastAPI(title="GoldSniper XAUUSD API", version="4.0")
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
-DERIV_API_KEY = os.environ.get("DERIV_API_KEY", "pat_0318d03baac60afe24a285c0acfc08c518073e72d226d97b0d7b34cbb1f518c2")
-DERIV_WS_URL  = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
+DERIV_API_KEY = os.environ.get("DERIV_API_KEY")
+if not DERIV_API_KEY:
+    raise RuntimeError("DERIV_API_KEY manquant : configure-le dans les variables d'environnement Render")
+
+DERIV_WS_URL  = "wss://ws.derivws.com/websockets/v3?app_id=1089"
 
 M15_SECONDS        = 900
-M3_SECONDS         = 60       # Micro-recalcul toutes les 1 minute
+M3_SECONDS         = 60     # Micro-recalcul toutes les 1 minute
 WAIT_AFTER_CLOSE   = 8
 MAX_WAIT_FOR_DATA  = 60
 
@@ -347,7 +350,7 @@ def build_features(dfs):
 # =====================================================================
 # PREDICTION
 # =====================================================================
-def run_prediction(all_candles: Dict[str,List[Candle]]) -> float:
+def run_prediction(all_candles: Dict[str,List[Candle]]) -> Dict[str, float]:
     dfs={tf:candles_to_df(c,tf) for tf,c in all_candles.items()}
     base=build_features(dfs)
 
