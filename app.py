@@ -136,6 +136,10 @@ def epoch_to_str(epoch: int) -> str:
 # =====================================================================
 # CONNEXION DERIV
 # =====================================================================
+
+_log(f"DEBUG: Key length is {len(DERIV_API_KEY)}")
+_log(f"DEBUG: Key starts with {DERIV_API_KEY[:4]}")
+
 async def connect_deriv():
     last_error = None
     for attempt in range(MAX_CONNECT_RETRIES):
