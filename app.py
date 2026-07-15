@@ -1,8 +1,10 @@
 """
-GoldSniper XAUUSD API v4.0
+GoldSniper XAUUSD API v4.1
 - Micro-recalcul toutes les 1 minute (au lieu de 15)
 - Signal principal a chaque bougie M15 fermee
 - Micro-checks entre les bougies pour detecter retournements rapides
+- Auth Deriv NON-BLOQUANTE : les donnees (ticks_history) sont publiques,
+  le pipeline tourne meme si le token est absent ou invalide
 """
 
 from fastapi import FastAPI
@@ -35,14 +37,14 @@ feature_cols = meta["feature_cols"]
 SEQ_LENGTH   = meta["seq_length"]
 N_FEATURES   = meta["n_features"]
 
-app = FastAPI(title="GoldSniper XAUUSD API", version="4.0")
+app = FastAPI(title="GoldSniper XAUUSD API", version="4.1")
 
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
-DERIV_API_KEY = os.environ.get("DERIV_API_KEY")
-if not DERIV_API_KEY:
-    raise RuntimeError("DERIV_API_KEY manquant : configure-le dans les variables d'environnement Render")
+# Le token est OPTIONNEL : ticks_history sur frxXAUUSD est une donnee publique.
+# On nettoie la valeur (espaces, retours a la ligne, guillemets colles par erreur).
+DERIV_API_KEY = os.environ.get("DERIV_API_KEY", "").strip().strip('"').strip("'")
 
 DERIV_WS_URL  = "wss://ws.derivws.com/websockets/v3?app_id=1089"
 
@@ -103,6 +105,12 @@ def _log(msg: str):
     now = datetime.now(timezone.utc).strftime("%H:%M:%S")
     print(f"[{now}] {msg}", flush=True)
 
+# --- DEBUG token (a retirer une fois le probleme resolu) ---
+if DERIV_API_KEY:
+    _log(f"DEBUG: token len={len(DERIV_API_KEY)} | debut={DERIV_API_KEY[:4]} | fin={DERIV_API_KEY[-4:]}")
+else:
+    _log("ATTENTION: DERIV_API_KEY absent -> connexion sans authentification (donnees publiques uniquement)")
+
 # =====================================================================
 # UTILITAIRES TEMPORELS
 # =====================================================================
@@ -136,10 +144,6 @@ def epoch_to_str(epoch: int) -> str:
 # =====================================================================
 # CONNEXION DERIV
 # =====================================================================
-
-_log(f"DEBUG: Key length is {len(DERIV_API_KEY)}")
-_log(f"DEBUG: Key starts with {DERIV_API_KEY[:4]}")
-
 async def connect_deriv():
     last_error = None
     for attempt in range(MAX_CONNECT_RETRIES):
@@ -152,10 +156,18 @@ async def connect_deriv():
             )
             await ws.send(json.dumps({"ping": 1}))
             await asyncio.wait_for(ws.recv(), timeout=WS_TIMEOUT)
-            await ws.send(json.dumps({"authorize": DERIV_API_KEY}))
-            auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=WS_TIMEOUT))
-            if "error" in auth:
-                raise Exception(f"Auth: {auth['error']['message']}")
+
+            # Auth OPTIONNELLE et NON-BLOQUANTE :
+            # ticks_history est public, un token invalide ne doit pas bloquer le pipeline.
+            if DERIV_API_KEY:
+                await ws.send(json.dumps({"authorize": DERIV_API_KEY}))
+                auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=WS_TIMEOUT))
+                if "error" in auth:
+                    _log(f"Auth echouee ({auth['error']['message']}) -> mode sans auth (donnees publiques)")
+                else:
+                    loginid = auth.get("authorize", {}).get("loginid", "?")
+                    _log(f"Auth OK (compte {loginid})")
+
             _log("Connexion Deriv OK")
             return ws
         except Exception as e:
@@ -179,7 +191,6 @@ async def fetch_candles(ws, tf_name: str, include_current: bool = False) -> List
     start_epoch = now_epoch - (HISTORY_DAYS[tf_name] * 86400)
 
     req = {
-    
         "ticks_history": "frxXAUUSD",
         # "ticks_history": "cryBTCUSD",
         "adjust_start_time": 1,
@@ -346,6 +357,9 @@ def build_features(dfs):
     base["session_asian"]=((hour>=0)&(hour<8)).astype(int)
     base["session_london"]=((hour>=8)&(hour<12)).astype(int)
     base["session_newyork"]=((hour>=13)&(hour<17)).astype(int)
+    # NOTE: identique a session_london — garde tel quel tant que le modele
+    # a ete entraine avec cette definition. A corriger seulement si tu
+    # reentraines le modele avec la meme correction.
     base["session_overlap"]=((hour>=8)&(hour<12)).astype(int)
 
     base = base.dropna().reset_index(drop=True)
@@ -442,7 +456,7 @@ def _scheduler_loop():
     asyncio.set_event_loop(loop)
     last_computed_m15 = None
 
-    _log("========== SCHEDULER v4.0 — Micro-recalcul 1min ==========")
+    _log("========== SCHEDULER v4.1 — Micro-recalcul 1min ==========")
 
     # Premier calcul
     try:
@@ -465,11 +479,11 @@ def _scheduler_loop():
             expected_m15 = get_expected_closed_bar_epoch()
 
             if expected_m15 != last_computed_m15:
-                # Nouvelle bougie M15 fermee → signal principal
+                # Nouvelle bougie M15 fermee -> signal principal
                 check_type = "M15"
                 _log(f"Nouvelle bougie M15: {epoch_to_str(expected_m15)}")
             else:
-                # Pas de nouvelle bougie M15 → micro-check
+                # Pas de nouvelle bougie M15 -> micro-check
                 check_type = "M3"
 
             # Executer le calcul
@@ -520,7 +534,7 @@ def force_refresh():
 def health():
     cache = _get_cache(); now = datetime.now(timezone.utc)
     return {
-        "api": "GoldSniper v4.0 (Micro-recalcul 1min)",
+        "api": "GoldSniper v4.1 (Micro-recalcul 1min, auth non-bloquante)",
         "time_utc": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model_features": N_FEATURES, "seq_length": SEQ_LENGTH,
         "signal_status": cache["status"],
@@ -531,11 +545,12 @@ def health():
         "next_m3_in_s": int(seconds_until_next_m3() + WAIT_AFTER_CLOSE),
         "next_m15_in_s": int(seconds_until_next_m15_close() + WAIT_AFTER_CLOSE),
         "scheduler_alive": _scheduler_thread.is_alive(),
+        "auth_token_present": bool(DERIV_API_KEY),
     }
 
 @app.get("/")
 def root():
-    return {"status": "GoldSniper XAUUSD API v4.0 (Micro-recalcul 1min)", "features": N_FEATURES}
+    return {"status": "GoldSniper XAUUSD API v4.1 (Micro-recalcul 1min)", "features": N_FEATURES}
 
 @app.post("/predict")
 def predict(request: PredictRequest):
@@ -568,7 +583,7 @@ def predict(request: PredictRequest):
 import uvicorn
 
 if __name__ == "__main__":
-    # Render définit la variable d'environnement PORT
+    # Render definit la variable d'environnement PORT
     port = int(os.environ.get("PORT", 10000))
     # On lance uvicorn sur 0.0.0.0 pour qu'il soit accessible
     uvicorn.run(app, host="0.0.0.0", port=port)
