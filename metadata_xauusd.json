@@ -351,10 +351,10 @@
     "session_overlap"
   ],
   "n_features": 346,
-  "best_epoch": 7,
-  "val_auc": 0.8389230370521545,
-  "test_auc": 0.827509389230406,
-  "test_accuracy": 0.7460083258681562,
+  "best_epoch": 13,
+  "val_auc": 0.861627995967865,
+  "test_auc": 0.8410896337594511,
+  "test_accuracy": 0.7572851346366655,
   "timeframes": [
     "M15",
     "M30",
@@ -367,5 +367,10 @@
   "test_size": 37954,
   "date_trained": "2026-07-16",
   "leak_free": false,
-  "requires_app_v42": false
+  "requires_app_v42": false,
+  "label_type": "triple_barriere",
+  "tb_horizon": 8,
+  "tb_atr_mult": 1.0,
+  "class_weighted": true,
+  "version": "v3"
 }
