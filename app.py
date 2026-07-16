@@ -1,5 +1,5 @@
 """
-GoldSniper XAUUSD API v4.1
+GoldSniper XAUUSD API v4.3
 - Micro-recalcul toutes les 1 minute (au lieu de 15)
 - Signal principal a chaque bougie M15 fermee
 - Micro-checks entre les bougies pour detecter retournements rapides
@@ -37,7 +37,7 @@ feature_cols = meta["feature_cols"]
 SEQ_LENGTH   = meta["seq_length"]
 N_FEATURES   = meta["n_features"]
 
-app = FastAPI(title="GoldSniper XAUUSD API", version="4.1")
+app = FastAPI(title="GoldSniper XAUUSD API", version="4.3")
 
 # =====================================================================
 # CONFIGURATION
@@ -104,6 +104,92 @@ def _get_cache() -> Dict:
 def _log(msg: str):
     now = datetime.now(timezone.utc).strftime("%H:%M:%S")
     print(f"[{now}] {msg}", flush=True)
+
+# =====================================================================
+# JOURNAL DES SIGNAUX (v4.3) — mesure du win rate reel en live
+# =====================================================================
+# On enregistre chaque signal M15 (BUY/SELL) avec le prix du moment.
+# FUTURE_BARS bougies plus tard, un endpoint verifie si le prix a bouge
+# dans le sens predit et met a jour les stats. Persistance dans un fichier
+# JSON pour survivre aux redemarrages Render.
+JOURNAL_FUTURE_BARS = 4                      # horizon = 4 bougies M15 (1h)
+JOURNAL_PATH = os.environ.get("JOURNAL_PATH", "/tmp/goldstark_journal.json")
+_journal_lock = threading.Lock()
+_journal = []   # liste de dicts : {bar_time, signal, entry_price, epoch, resolved, win, exit_price}
+
+def _journal_load():
+    global _journal
+    try:
+        with open(JOURNAL_PATH) as f:
+            _journal = json.load(f)
+        _log(f"Journal charge : {len(_journal)} signaux")
+    except Exception:
+        _journal = []
+
+def _journal_save():
+    try:
+        with open(JOURNAL_PATH, "w") as f:
+            json.dump(_journal, f)
+    except Exception as e:
+        _log(f"Journal save erreur: {e}")
+
+def journal_record(signal: str, bar_time: str, entry_price: float):
+    """Enregistre un nouveau signal (seulement BUY/SELL, jamais NEUTRAL)."""
+    if signal not in ("BUY", "SELL"):
+        return
+    with _journal_lock:
+        # eviter les doublons sur la meme bougie
+        if any(e["bar_time"] == bar_time for e in _journal if not e.get("is_micro")):
+            return
+        _journal.append({
+            "bar_time": bar_time,
+            "signal": signal,
+            "entry_price": entry_price,
+            "epoch": int(datetime.now(timezone.utc).timestamp()),
+            "resolved": False, "win": None, "exit_price": None,
+        })
+        _journal_save()
+
+def journal_resolve(current_price: float):
+    """Marque comme gagnant/perdant les signaux dont l'horizon est ecoule."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    horizon = JOURNAL_FUTURE_BARS * M15_SECONDS
+    changed = False
+    with _journal_lock:
+        for e in _journal:
+            if e["resolved"]:
+                continue
+            if now - e["epoch"] >= horizon:
+                moved_up = current_price > e["entry_price"]
+                e["win"] = bool((e["signal"] == "BUY" and moved_up) or
+                                (e["signal"] == "SELL" and not moved_up))
+                e["exit_price"] = current_price
+                e["resolved"] = True
+                changed = True
+        if changed:
+            _journal_save()
+
+def journal_stats() -> dict:
+    with _journal_lock:
+        resolved = [e for e in _journal if e["resolved"]]
+        wins = sum(1 for e in resolved if e["win"])
+        n = len(resolved)
+        buys = [e for e in resolved if e["signal"] == "BUY"]
+        sells = [e for e in resolved if e["signal"] == "SELL"]
+        return {
+            "total_signaux": len(_journal),
+            "resolus": n,
+            "en_attente": len(_journal) - n,
+            "gagnants": wins,
+            "perdants": n - wins,
+            "win_rate": round(wins / n, 4) if n else None,
+            "win_rate_buy": round(sum(1 for e in buys if e["win"]) / len(buys), 4) if buys else None,
+            "win_rate_sell": round(sum(1 for e in sells if e["win"]) / len(sells), 4) if sells else None,
+            "horizon_bougies": JOURNAL_FUTURE_BARS,
+            "note": "Win rate live reel. >55% net de spread = signal exploitable. ~50% = aleatoire.",
+        }
+
+_journal_load()
 
 # --- DEBUG token (a retirer une fois le probleme resolu) ---
 if DERIV_API_KEY:
@@ -415,6 +501,15 @@ async def compute_signal(check_type: str = "M15"):
         conf = result["confidence"]
         signal = "BUY" if prob >= 0.66 else ("SELL" if prob <= 0.34 else "NEUTRAL")
 
+        # v4.3 JOURNAL : prix courant = dernier close M15 disponible
+        try:
+            last_close = float(all_candles["M15"][-1].close)
+            journal_resolve(last_close)                 # resout les anciens signaux
+            if not is_micro:                            # enregistre uniquement le signal M15
+                journal_record(signal, epoch_to_str(get_expected_closed_bar_epoch()), last_close)
+        except Exception as _je:
+            _log(f"Journal hook erreur: {_je}")
+
         now = datetime.now(timezone.utc)
         compute_ms = int((time.time() - t_start) * 1000)
 
@@ -456,7 +551,7 @@ def _scheduler_loop():
     asyncio.set_event_loop(loop)
     last_computed_m15 = None
 
-    _log("========== SCHEDULER v4.1 — Micro-recalcul 1min ==========")
+    _log("========== SCHEDULER v4.3 — Micro-recalcul 1min ==========")
 
     # Premier calcul
     try:
@@ -534,7 +629,7 @@ def force_refresh():
 def health():
     cache = _get_cache(); now = datetime.now(timezone.utc)
     return {
-        "api": "GoldSniper v4.1 (Micro-recalcul 1min, auth non-bloquante)",
+        "api": "GoldSniper v4.3 (journal /stats live)",
         "time_utc": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model_features": N_FEATURES, "seq_length": SEQ_LENGTH,
         "signal_status": cache["status"],
@@ -548,9 +643,14 @@ def health():
         "auth_token_present": bool(DERIV_API_KEY),
     }
 
+@app.get("/stats")
+def stats():
+    """Win rate reel des signaux en live (journal v4.3)."""
+    return journal_stats()
+
 @app.get("/")
 def root():
-    return {"status": "GoldSniper XAUUSD API v4.1 (Micro-recalcul 1min)", "features": N_FEATURES}
+    return {"status": "GoldSniper XAUUSD API v4.3 (Micro-recalcul 1min)", "features": N_FEATURES}
 
 @app.post("/predict")
 def predict(request: PredictRequest):
