@@ -29,7 +29,23 @@ from datetime import datetime, timezone
 # CHARGEMENT MODELE
 # =====================================================================
 import tensorflow as tf
-model   = tf.keras.models.load_model("model_xauusd_best.keras")
+
+# Chargement robuste du modele :
+# - compile=False : on ne fait que de l'inference, pas besoin optimiseur/metriques
+#   (evite les erreurs de version type "quantization_config" / "mixed_float16")
+# - priorite au .h5 (format stable entre versions Keras), fallback sur .keras
+def _load_model():
+    for path in ("model_xauusd_best.h5", "model_xauusd_best.keras"):
+        if os.path.exists(path):
+            try:
+                m = tf.keras.models.load_model(path, compile=False)
+                print(f"Modele charge depuis {path}", flush=True)
+                return m
+            except Exception as e:
+                print(f"Echec chargement {path}: {str(e)[:200]}", flush=True)
+    raise RuntimeError("Aucun modele chargeable (ni .h5 ni .keras)")
+
+model   = _load_model()
 scaler  = joblib.load("scaler_xauusd.joblib")
 with open("metadata_xauusd.json") as f:
     meta = json.load(f)
