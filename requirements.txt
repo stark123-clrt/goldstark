@@ -1,7 +1,6 @@
 fastapi
 uvicorn
-tensorflow-cpu==2.19.0
-keras==3.13.2
+tensorflow==2.19.0
 joblib
 pandas
 numpy

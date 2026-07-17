@@ -351,10 +351,10 @@
     "session_overlap"
   ],
   "n_features": 346,
-  "best_epoch": 13,
-  "val_auc": 0.861627995967865,
-  "test_auc": 0.8410896337594511,
-  "test_accuracy": 0.7572851346366655,
+  "best_epoch": 15,
+  "val_auc": 0.7858676910400391,
+  "test_auc": 0.7474537243415864,
+  "test_accuracy": 0.6793333333333333,
   "timeframes": [
     "M15",
     "M30",
@@ -362,15 +362,8 @@
     "H4",
     "Daily"
   ],
-  "train_size": 177116,
-  "val_size": 37953,
-  "test_size": 37954,
-  "date_trained": "2026-07-16",
-  "leak_free": false,
-  "requires_app_v42": false,
-  "label_type": "triple_barriere",
-  "tb_horizon": 8,
-  "tb_atr_mult": 1.0,
-  "class_weighted": true,
-  "version": "v3"
+  "train_size": 70180,
+  "val_size": 14999,
+  "test_size": 15000,
+  "date_trained": "2026-02-22"
 }
