@@ -146,24 +146,33 @@ def epoch_to_str(epoch: int) -> str:
 async def connect_deriv():
     last_error = None
     
+    # Masquage de l'identité du bot pour passer le pare-feu Cloudflare (évite l'erreur 520)
+    custom_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
     for attempt in range(MAX_CONNECT_RETRIES):
         ws = None
         try:
             _log(f"Connexion Deriv ({attempt+1}/{MAX_CONNECT_RETRIES})...")
             
-            # Connexion normale SANS le paramètre extra_headers
+            # Connexion avec l'en-tête personnalisé
             ws = await asyncio.wait_for(
                 websockets.connect(
                     DERIV_WS_URL, 
                     ping_interval=20, 
                     ping_timeout=10, 
-                    close_timeout=5
+                    close_timeout=5,
+                    extra_headers=custom_headers
                 ),
                 timeout=WS_TIMEOUT
             )
+            
+            # Test de la connexion avec un ping
             await ws.send(json.dumps({"ping": 1}))
             await asyncio.wait_for(ws.recv(), timeout=WS_TIMEOUT)
 
+            # Authentification (Optionnelle)
             if DERIV_API_KEY:
                 await ws.send(json.dumps({"authorize": DERIV_API_KEY}))
                 auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=WS_TIMEOUT))
@@ -175,14 +184,18 @@ async def connect_deriv():
 
             _log("Connexion Deriv OK")
             return ws
+            
         except Exception as e:
             last_error = e
             if ws:
-                try: await ws.close()
-                except: pass
+                try: 
+                    await ws.close()
+                except: 
+                    pass
             delay = min(RETRY_BASE_DELAY * (2 ** attempt), 30)
             _log(f"Echec: {e}. Retry dans {delay}s...")
             await asyncio.sleep(delay)
+            
     raise Exception(f"Connexion impossible apres {MAX_CONNECT_RETRIES} tentatives: {last_error}")
 
 async def fetch_candles(ws, tf_name: str, include_current: bool = False) -> List[Candle]:
