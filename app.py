@@ -46,7 +46,8 @@ app = FastAPI(title="GoldSniper XAUUSD API", version="4.1")
 # On nettoie la valeur (espaces, retours a la ligne, guillemets colles par erreur).
 DERIV_API_KEY = os.environ.get("DERIV_API_KEY", "").strip().strip('"').strip("'")
 
-DERIV_WS_URL  = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+# Remplacez 1089 par votre propre App ID une fois créé
+DERIV_WS_URL  = "wss://ws.derivws.com/websockets/v3?app_id=34xSuGBG6QR7xUOC8Kv4P"
 
 M15_SECONDS        = 900
 M3_SECONDS         = 60     # Micro-recalcul toutes les 1 minute
@@ -109,7 +110,7 @@ def _log(msg: str):
 if DERIV_API_KEY:
     _log(f"DEBUG: token len={len(DERIV_API_KEY)} | debut={DERIV_API_KEY[:4]} | fin={DERIV_API_KEY[-4:]}")
 else:
-    _log("ATTENTION: DERIV_API_KEY absent -> connexion sans authentification (donnees publiques uniquement)")
+    _log("ATTENTION: DERIV_API_KEY absent -> connexion sans authentification (donnees publiques)")
 
 # =====================================================================
 # UTILITAIRES TEMPORELS
@@ -126,39 +127,47 @@ def seconds_until_next_m15_close() -> float:
     return max(next_close - now, 0)
 
 def seconds_until_next_m3() -> float:
-    """Secondes jusqu'au prochain cycle de 1 minute."""
     now = datetime.now(timezone.utc).timestamp()
     current_m3_start = now - (now % M3_SECONDS)
     next_m3 = current_m3_start + M3_SECONDS
     return max(next_m3 - now, 0)
 
 def is_m15_boundary() -> bool:
-    """Verifie si on est juste apres une fermeture de bougie M15."""
     now = datetime.now(timezone.utc).timestamp()
     seconds_since_m15 = now % M15_SECONDS
-    return seconds_since_m15 < 30  # Dans les 30 premieres secondes apres fermeture M15
+    return seconds_since_m15 < 30
 
 def epoch_to_str(epoch: int) -> str:
     return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 # =====================================================================
-# CONNEXION DERIV
+# CONNEXION DERIV (MODIFIÉE)
 # =====================================================================
 async def connect_deriv():
     last_error = None
+    
+    # Masquage de l'identité du bot pour passer Cloudflare
+    custom_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
     for attempt in range(MAX_CONNECT_RETRIES):
         ws = None
         try:
             _log(f"Connexion Deriv ({attempt+1}/{MAX_CONNECT_RETRIES})...")
             ws = await asyncio.wait_for(
-                websockets.connect(DERIV_WS_URL, ping_interval=20, ping_timeout=10, close_timeout=5),
+                websockets.connect(
+                    DERIV_WS_URL, 
+                    ping_interval=20, 
+                    ping_timeout=10, 
+                    close_timeout=5,
+                    extra_headers=custom_headers # Ajout des headers ici
+                ),
                 timeout=WS_TIMEOUT
             )
             await ws.send(json.dumps({"ping": 1}))
             await asyncio.wait_for(ws.recv(), timeout=WS_TIMEOUT)
 
-            # Auth OPTIONNELLE et NON-BLOQUANTE :
-            # ticks_history est public, un token invalide ne doit pas bloquer le pipeline.
             if DERIV_API_KEY:
                 await ws.send(json.dumps({"authorize": DERIV_API_KEY}))
                 auth = json.loads(await asyncio.wait_for(ws.recv(), timeout=WS_TIMEOUT))
@@ -180,19 +189,12 @@ async def connect_deriv():
             await asyncio.sleep(delay)
     raise Exception(f"Connexion impossible apres {MAX_CONNECT_RETRIES} tentatives: {last_error}")
 
-
 async def fetch_candles(ws, tf_name: str, include_current: bool = False) -> List[Candle]:
-    """
-    Recupere les bougies par date de debut.
-    include_current=True : garde la bougie en cours (pour micro-check)
-    include_current=False : supprime la derniere bougie (signal M15 classique)
-    """
     now_epoch = int(datetime.now(timezone.utc).timestamp())
     start_epoch = now_epoch - (HISTORY_DAYS[tf_name] * 86400)
 
     req = {
         "ticks_history": "frxXAUUSD",
-        # "ticks_history": "cryBTCUSD",
         "adjust_start_time": 1,
         "start": start_epoch,
         "end": "latest",
@@ -212,8 +214,6 @@ async def fetch_candles(ws, tf_name: str, include_current: bool = False) -> List
             if len(candles_raw) < 5:
                 raise Exception(f"{tf_name}: seulement {len(candles_raw)} bougies")
 
-            # Pour le micro-check M15, on garde la bougie en cours
-            # Pour les autres TF et le signal principal, on la supprime
             if not include_current:
                 candles_raw = candles_raw[:-1]
 
@@ -230,18 +230,11 @@ async def fetch_candles(ws, tf_name: str, include_current: bool = False) -> List
                 await asyncio.sleep(2)
     raise Exception(f"{tf_name} echec: {last_error}")
 
-
 async def fetch_all_candles(is_micro_check: bool = False) -> Dict[str, List[Candle]]:
-    """
-    Recupere toutes les TF.
-    is_micro_check=True : inclut la bougie M15 en cours (pas encore fermee)
-    is_micro_check=False : bougies fermees uniquement (signal principal)
-    """
     ws = await connect_deriv()
     try:
         all_candles = {}
         for tf in ["M15", "M30", "H1", "H4", "Daily"]:
-            # Pour le micro-check, on inclut la bougie M15 en cours
             include = (is_micro_check and tf == "M15")
             all_candles[tf] = await fetch_candles(ws, tf, include_current=include)
             _log(f"  {tf}: {len(all_candles[tf])} bougies"
@@ -250,7 +243,6 @@ async def fetch_all_candles(is_micro_check: bool = False) -> Dict[str, List[Cand
     finally:
         try: await ws.close()
         except: pass
-
 
 # =====================================================================
 # FEATURE ENGINEERING
@@ -357,9 +349,6 @@ def build_features(dfs):
     base["session_asian"]=((hour>=0)&(hour<8)).astype(int)
     base["session_london"]=((hour>=8)&(hour<12)).astype(int)
     base["session_newyork"]=((hour>=13)&(hour<17)).astype(int)
-    # NOTE: identique a session_london — garde tel quel tant que le modele
-    # a ete entraine avec cette definition. A corriger seulement si tu
-    # reentraines le modele avec la meme correction.
     base["session_overlap"]=((hour>=8)&(hour<12)).astype(int)
 
     base = base.dropna().reset_index(drop=True)
@@ -396,10 +385,6 @@ def run_prediction(all_candles: Dict[str,List[Candle]]) -> Dict[str, float]:
 # PIPELINE — Signal principal (M15) et Micro-check (M3)
 # =====================================================================
 async def compute_signal(check_type: str = "M15"):
-    """
-    check_type = "M15" : signal principal apres fermeture bougie M15
-    check_type = "M3"  : micro-verification avec bougie M15 en cours
-    """
     t_start = time.time()
     is_micro = (check_type == "M3")
 
@@ -418,8 +403,6 @@ async def compute_signal(check_type: str = "M15"):
         now = datetime.now(timezone.utc)
         compute_ms = int((time.time() - t_start) * 1000)
 
-        # Pour le micro-check, valid_until = prochain micro-check (1 min)
-        # Pour le signal M15, valid_until = prochaine bougie M15
         if is_micro:
             valid_epoch = int(now.timestamp()) + M3_SECONDS + 30
         else:
@@ -442,7 +425,6 @@ async def compute_signal(check_type: str = "M15"):
     except Exception as e:
         compute_ms = int((time.time() - t_start) * 1000)
         _log(f"=== ERREUR {check_type}: {str(e)[:200]} ===")
-        # Pour un micro-check echoue, on ne remplace pas un signal M15 valide
         if not is_micro:
             _update_cache(status="error", message=f"Erreur: {str(e)[:200]}", compute_ms=compute_ms)
         else:
@@ -458,7 +440,6 @@ def _scheduler_loop():
 
     _log("========== SCHEDULER v4.1 — Micro-recalcul 1min ==========")
 
-    # Premier calcul
     try:
         loop.run_until_complete(compute_signal("M15"))
         last_computed_m15 = get_expected_closed_bar_epoch()
@@ -467,7 +448,6 @@ def _scheduler_loop():
 
     while True:
         try:
-            # Attendre le prochain cycle de 1 minute
             wait_secs = seconds_until_next_m3() + WAIT_AFTER_CLOSE
             next_time = datetime.fromtimestamp(
                 datetime.now(timezone.utc).timestamp() + wait_secs, tz=timezone.utc
@@ -475,18 +455,14 @@ def _scheduler_loop():
             _log(f"Attente {wait_secs:.0f}s -> prochain check ~{next_time} UTC")
             time.sleep(wait_secs)
 
-            # Determiner le type de check
             expected_m15 = get_expected_closed_bar_epoch()
 
             if expected_m15 != last_computed_m15:
-                # Nouvelle bougie M15 fermee -> signal principal
                 check_type = "M15"
                 _log(f"Nouvelle bougie M15: {epoch_to_str(expected_m15)}")
             else:
-                # Pas de nouvelle bougie M15 -> micro-check
                 check_type = "M3"
 
-            # Executer le calcul
             success = False
             for retry in range(3):
                 try:
@@ -583,7 +559,5 @@ def predict(request: PredictRequest):
 import uvicorn
 
 if __name__ == "__main__":
-    # Render definit la variable d'environnement PORT
     port = int(os.environ.get("PORT", 10000))
-    # On lance uvicorn sur 0.0.0.0 pour qu'il soit accessible
     uvicorn.run(app, host="0.0.0.0", port=port)
