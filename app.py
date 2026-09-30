@@ -146,22 +146,18 @@ def epoch_to_str(epoch: int) -> str:
 async def connect_deriv():
     last_error = None
     
-    # Masquage de l'identité du bot pour passer Cloudflare
-    custom_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
     for attempt in range(MAX_CONNECT_RETRIES):
         ws = None
         try:
             _log(f"Connexion Deriv ({attempt+1}/{MAX_CONNECT_RETRIES})...")
+            
+            # Connexion normale SANS le paramètre extra_headers
             ws = await asyncio.wait_for(
                 websockets.connect(
                     DERIV_WS_URL, 
                     ping_interval=20, 
                     ping_timeout=10, 
-                    close_timeout=5,
-                    extra_headers=custom_headers # Ajout des headers ici
+                    close_timeout=5
                 ),
                 timeout=WS_TIMEOUT
             )
