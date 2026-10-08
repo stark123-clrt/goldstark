@@ -7,4 +7,4 @@ numpy
 scikit-learn
 pydantic
 ta
-websockets>=12.0
+websockets>=14.0

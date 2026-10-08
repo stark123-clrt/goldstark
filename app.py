@@ -46,8 +46,12 @@ app = FastAPI(title="GoldSniper XAUUSD API", version="4.1")
 # On nettoie la valeur (espaces, retours a la ligne, guillemets colles par erreur).
 DERIV_API_KEY = os.environ.get("DERIV_API_KEY", "").strip().strip('"').strip("'")
 
-# Remplacez 1089 par votre propre App ID une fois créé
-DERIV_WS_URL  = "wss://ws.derivws.com/websockets/v3?app_id=34xSuGBG6QR7xUOC8Kv4P"
+# L'ancien endpoint ws.derivws.com/websockets/v3 renvoie HTTP 520 (Cloudflare) :
+# on utilise le nouvel endpoint public de Deriv (ticks_history fonctionne sans auth).
+DERIV_WS_URL  = os.environ.get(
+    "DERIV_WS_URL",
+    "wss://api.derivws.com/trading/v1/options/ws/public?app_id=34xSuGBG6QR7xUOC8Kv4P",
+)
 
 M15_SECONDS        = 900
 M3_SECONDS         = 60     # Micro-recalcul toutes les 1 minute
@@ -147,9 +151,7 @@ async def connect_deriv():
     last_error = None
     
     # Masquage de l'identité du bot pour passer le pare-feu Cloudflare (évite l'erreur 520)
-    custom_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     for attempt in range(MAX_CONNECT_RETRIES):
         ws = None
@@ -163,7 +165,7 @@ async def connect_deriv():
                     ping_interval=20, 
                     ping_timeout=10, 
                     close_timeout=5,
-                    extra_headers=custom_headers
+                    user_agent_header=user_agent
                 ),
                 timeout=WS_TIMEOUT
             )
