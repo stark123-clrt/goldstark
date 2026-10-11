@@ -36,6 +36,11 @@ with open("metadata_xauusd.json") as f:
 feature_cols = meta["feature_cols"]
 SEQ_LENGTH   = meta["seq_length"]
 N_FEATURES   = meta["n_features"]
+# Modele v5+ : HTF alignees sur leur heure de cloture (= bougies fermees seulement) et entrees bornees
+HTF_ALIGN    = meta.get("htf_align", "open")
+CLIP         = meta.get("clip")
+HTF_DURATION = {"M30": pd.Timedelta(minutes=30), "H1": pd.Timedelta(hours=1),
+                "H4": pd.Timedelta(hours=4), "Daily": pd.Timedelta(days=1)}
 
 app = FastAPI(title="GoldSniper XAUUSD API", version="4.1")
 
@@ -320,8 +325,11 @@ def build_features(dfs):
     base=tf_dfs["M15"].copy()
 
     for tf_name in ["M30","H1","H4","Daily"]:
+        htf=tf_dfs[tf_name]
+        if HTF_ALIGN=="close":
+            htf=htf.assign(datetime=(htf["datetime"]+HTF_DURATION[tf_name]).astype(base["datetime"].dtype))
         base=pd.merge_asof(
-            base, tf_dfs[tf_name],
+            base, htf,
             on="datetime", direction="backward",
             tolerance=MERGE_TOLERANCES[tf_name]
         )
@@ -385,6 +393,7 @@ def run_prediction(all_candles: Dict[str,List[Candle]]) -> Dict[str, float]:
         X=full
     X_scaled=scaler.transform(X)
     X_scaled=np.nan_to_num(X_scaled,nan=0.0,posinf=0.0,neginf=0.0)
+    if CLIP: X_scaled=np.clip(X_scaled,-CLIP,CLIP)
     X_input=X_scaled.reshape(1,SEQ_LENGTH,N_FEATURES)
     preds=model.predict(X_input,verbose=0)
     return {
@@ -557,6 +566,7 @@ def predict(request: PredictRequest):
             X = full
         X_scaled = scaler.transform(X)
         X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+        if CLIP: X_scaled = np.clip(X_scaled, -CLIP, CLIP)
         X_input = X_scaled.reshape(1, SEQ_LENGTH, N_FEATURES)
         preds = model.predict(X_input, verbose=0)
         return {

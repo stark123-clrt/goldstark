@@ -20,13 +20,13 @@ def load_app_funcs():
             keep.append(n)
         elif isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "MERGE_TOLERANCES":
             keep.append(n)
-    ns = {}
+    ns = {"HTF_ALIGN": "open", "HTF_DURATION": {}}   # les decalages HTF sont faits par l'appelant
     exec(compile(ast.Module(keep, []), "app.py", "exec"), ns)
     return ns
 
-def load_m1():
+def load_m1(pattern="DAT_ASCII_XAUUSD_M1_*.csv"):
     dfs = []
-    for p in sorted(DATA.glob("DAT_ASCII_XAUUSD_M1_*.csv")):
+    for p in sorted(DATA.glob(pattern)):
         d = pd.read_csv(p, sep=";", header=None, names=["dt", "open", "high", "low", "close", "vol"])
         d["datetime"] = pd.to_datetime(d["dt"], format="%Y%m%d %H%M%S") + pd.Timedelta(hours=5)
         dfs.append(d[["datetime", "open", "high", "low", "close"]])
