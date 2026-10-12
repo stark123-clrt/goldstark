@@ -365,19 +365,5 @@
   "train_size": 70180,
   "val_size": 14999,
   "test_size": 15000,
-  "date_trained": "2026-10-11",
-  "finetuned_from": "2026-02-22",
-  "data_end": "2026-10-09 09:44:00+00:00",
-  "htf_align": "close",
-  "recommended_thresholds": {
-    "buy": 0.55,
-    "sell": 0.45
-  },
-  "auc_direct_deriv_2026-08-15_2026-10-09": {
-    "m15": 0.551,
-    "micro_m5": 0.551,
-    "micro_m10": 0.556,
-    "ancien_modele_m15": 0.532
-  },
-  "note": "val_auc/test_auc = scores de l'entrainement d'origine (avec bougies HTF non fermees). Score reel en direct : auc_direct_*"
+  "date_trained": "2026-02-22"
 }
